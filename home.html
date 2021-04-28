@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+  <meta charset="utf-8" />
+  <svg width="960" height="600"></svg>
+  <div class="slidecontainer">
+    <p>Slider for lower bound of the Timeframe:</p>
+    <input
+      id="lower"
+      type="range"
+      min="1"
+      max="100"
+      value="0"
+      style="width: 500px"
+    />
+  </div>
+  <div class="slidecontainer">
+    <p>Slider for upper bound of the Timeframe:</p>
+    <input
+      id="upper"
+      type="range"
+      min="1"
+      max="100"
+      value="100"
+      style="width: 500px"
+    />
+  </div>
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <script src="enron-v1.js"></script>
+
+  <script>
+    // const config = {
+    //   repulsion: 5,
+    //   linkLength: 50,
+    //   linkForce: 0.001,
+    //   linkOpacity: 0.1,
+    //   linkWidth: 1,
+    //   nodeSize: 5,
+    // };
+
+    const config = {
+      repulsion: 5,
+      linkLength: 100,
+      linkForce: 0.004,
+      linkOpacity: 0.1,
+      linkWidth: 1,
+      nodeSize: 5,
+      centerForce: 0.1,
+    };
+
+    var zoom = d3.zoom().on("zoom", (event) => {
+      svg.attr("transform", event.transform);
+    });
+
+    var svg = d3.select("svg").call(zoom);
+    var width = svg.attr("width");
+    var height = svg.attr("height");
+
+    const graphData = {
+      nodes: dataSet.people.map((person) => ({
+        ...person,
+        x: Math.random() * width,
+        y: Math.random() * height,
+      })),
+      links: dataSet.emails.map((link) => ({
+        ...link,
+        date: new Date(link.timestamp),
+      })),
+    };
+
+    var min = Infinity;
+    for (var i = 0; i < graphData.links.length; i++) {
+      const millis = graphData.links[i]["date"].getTime();
+      if (millis < min) {
+        min = millis;
+      }
+    }
+
+    var max = -Infinity;
+    for (var i = 0; i < graphData.links.length; i++) {
+      const millis = graphData.links[i]["date"].getTime();
+      if (millis > max) {
+        max = millis;
+      }
+    }
+
+    window.onload = () => {
+      var rangeStart = min;
+      document.getElementById("lower").addEventListener("change", (e) => {
+        const per = Number(e.target.value) / 100;
+        rangeStart = min + (max - min) * per;
+        updateDataSet();
+      });
+      var rangeEnd = max;
+      document.getElementById("upper").addEventListener("change", (e) => {
+        const per = Number(e.target.value) / 100;
+        rangeEnd = min + (max - min) * per;
+        updateDataSet();
+      });
+
+      function updateDataSet() {
+        const graphDataSliced = {
+          nodes: graphData.nodes,
+          links: graphData.links.filter(
+            (link) => rangeStart < link.date && link.date < rangeEnd
+          ),
+        };
+
+        updateVisualization(graphDataSliced);
+      }
+    };
+
+    function getColorCode() {
+      var makeColorCode = "0123456789ABCDEF";
+      var code = "#";
+      for (var count = 0; count < 6; count++) {
+        code = code + makeColorCode[Math.floor(Math.random() * 16)];
+      }
+      return code;
+    }
+
+    var colorJobs = {};
+    for (i = 0; i < dataSet.jobs.length; i++) {
+      const jobTitle = dataSet.jobs[i];
+      colorJobs[jobTitle] = getColorCode();
+    }
+    console.log(dataSet.people.length); // 149 people
+    console.log(dataSet.emails.length); // 31 041 emails
+
+    //initialize svg
+    var simulation = d3
+      .forceSimulation()
+      .force("charge", d3.forceManyBody().strength(-config.repulsion))
+      .force(
+        "link",
+        d3
+          .forceLink()
+          .id((d) => d.id)
+          .strength(config.linkForce)
+          .distance(config.linkLength)
+      )
+      .force(
+        "center",
+        d3.forceCenter(width / 2, height / 2).strength(config.centerForce)
+      )
+      .on("tick", ticked);
+
+    var links = svg.append("g").selectAll("line");
+    var nodes = svg.append("g").selectAll("circle");
+
+    function ticked() {
+      //updating the position
+      nodes.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+
+      links
+        .attr("x1", (d) => d.source.x)
+        .attr("y1", (d) => d.source.y)
+        .attr("x2", (d) => d.target.x)
+        .attr("y2", (d) => d.target.y);
+    }
+
+    function updateVisualization(graphData) {
+      linksData = svg
+        .select("g")
+        .selectAll("line")
+        .data(graphData.links, (d) => [d.source, d.target]);
+      links = linksData
+        .join("line")
+        .attr("stroke-width", config.linkWidth)
+        .attr("stroke-opacity", config.linkOpacity)
+        .style("stroke", (link) => {
+          const p = (link.sentiment + 1) * 0.5;
+          const t = p < 0.5 ? 8 * p * p * p * p : 1 - 8 * (p - 1) * p * p * p;
+          return (
+            "rgb(" +
+            Math.floor((1 - t) * 255) +
+            ", " +
+            Math.floor(t * 255) +
+            ", 128)"
+          );
+        });
+
+      var drag = d3
+        .drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended);
+
+      nodesData = svg
+        .select("g")
+        .selectAll("circle")
+        .data(graphData.nodes, (d) => d.id);
+      nodes = nodesData
+        .join("circle")
+        .attr("r", config.nodeSize)
+        .attr("fill", (d) => {
+          const group = d.group;
+          return colorJobs[group];
+        })
+        .call(drag);
+      nodes.append("title").text((d) => d.mail + " " + d.id + " " + d.group);
+
+      function dragstarted() {}
+      function dragged(event, d) {
+        d.x = event.x;
+        d.y = event.y;
+        simulation.alpha(1).restart();
+      }
+      function dragended() {}
+
+      simulation.nodes(graphData.nodes);
+      simulation.force("link").links(graphData.links);
+      simulation.alpha(1).restart();
+    }
+    updateVisualization(graphData);
+  </script>
+</html>
